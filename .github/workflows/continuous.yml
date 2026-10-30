@@ -1,0 +1,77 @@
+name: Continuous build (Launchpad X)
+
+# Builds both Launchpad X firmware variants (Launchpad95-style and Novation-style
+# sequencer) on every push to lpx-seq95, checks them with the release verifier and
+# publishes them in the pre-release "continuous". Only the Launchpad X is built and
+# tested here; the images have been run on one Launchpad X and on no other model.
+
+on:
+  push:
+    branches: [lpx-seq95]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: continuous
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+          targets: thumbv7em-none-eabihf,thumbv7m-none-eabi
+          components: rust-src,llvm-tools
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install the ARM binutils the verifier needs
+        run: sudo apt-get update && sudo apt-get install -y binutils-arm-none-eabi
+
+      - name: Host tests of the sequencers, modes and the store
+        run: cargo test -p novseq -p seq95 -p notemode -p custommode -p safestore
+
+      # The verifier reads target/.../core, so each variant is built and checked
+      # before the next build overwrites it.
+      - name: Build and verify the Launchpad95-style variant
+        run: |
+          LPX_SEQUENCER=launchpad95 cargo run -p xtask -- package lpx --release
+          python3 tools/verify_lpx.py target/thumbv7em-none-eabihf/release/core build/lpx/fw.bin build/lpx/fw.syx tools/syxtool.py
+          mkdir -p dist
+          cp build/lpx/fw.syx dist/launchpad-x-launchpad95-sequencer.syx
+
+      - name: Build and verify the Novation-style variant
+        run: |
+          LPX_SEQUENCER=novation cargo run -p xtask -- package lpx --release
+          python3 tools/verify_lpx.py target/thumbv7em-none-eabihf/release/core build/lpx/fw.bin build/lpx/fw.syx tools/syxtool.py
+          cp build/lpx/fw.syx dist/launchpad-x-novation-sequencer.syx
+
+      - name: Add the flashing scripts
+        run: |
+          cp flash/flash-linux.sh flash/flash.py dist/
+          cp flash/README.md dist/FLASHING.md
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.syx | tee SHA256SUMS
+
+      - name: Publish the "continuous" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete continuous --cleanup-tag --yes || true
+          gh release create continuous dist/* \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Continuous build" \
+            --notes "Latest build of branch lpx-seq95 (commit $GITHUB_SHA) for the Launchpad X only. Two variants: launchpad-x-launchpad95-sequencer.syx and launchpad-x-novation-sequencer.syx, with flash-linux.sh (tested) and flash.py (not tested) to upload them; see FLASHING.md. Tested on one Launchpad X; do not flash on other models. Flash through the bootloader (hold Capture MIDI while plugging in); see docs/user-manual.md chapter 12."

@@ -17,6 +17,7 @@ their Launchpad X.
 | [note-mode-launchpad-x.md](note-mode-launchpad-x.md) | Note Mode in detail: layouts, Chord, settings, design decisions |
 | [custom-modes-launchpad-x.md](custom-modes-launchpad-x.md) | The eight Custom Modes in detail |
 | [seq95-launchpad-x.md](seq95-launchpad-x.md) | The step sequencer in detail |
+| [../flash/README.md](../flash/README.md) | How to upload a firmware file with the flashing scripts |
 | [tested-hardware.md](tested-hardware.md) | Exactly which hardware was tested (one Launchpad X), which models only compile, what is still untested |
 | [storage-design.md](storage-design.md) | What is saved, when, and why saving cannot brick the Launchpad |
 | [feature-comparison.md](feature-comparison.md) | What the Novation Launchpad Pro [MK3] guide describes that we do not have yet, and a prioritized list |
