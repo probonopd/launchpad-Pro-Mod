@@ -12,31 +12,31 @@ use crate::{PROJECT_SLOTS, Seq95, Storage};
 pub const LED_COUNT: usize = 110;
 
 // Launchpad Pro Mk3 programmer-mode indexes.
-const SHIFT: u8 = 90;
-const LEFT: u8 = 91;
-const RIGHT: u8 = 92;
-const PROJECTS: u8 = 98;
-const UP: u8 = 80;
-const DOWN: u8 = 70;
-const CLEAR: u8 = 60;
-const DUPLICATE: u8 = 50;
-const QUANTISE: u8 = 40;
-const FIXED_LENGTH: u8 = 30;
-const PLAY: u8 = 20;
-const RECORD: u8 = 10;
-const MUTE: u8 = 102;
-const SOLO: u8 = 103;
-const CUSTOM: u8 = 96;
+pub(crate) const SHIFT: u8 = 90;
+pub(crate) const LEFT: u8 = 91;
+pub(crate) const RIGHT: u8 = 92;
+pub(crate) const PROJECTS: u8 = 98;
+pub(crate) const UP: u8 = 80;
+pub(crate) const DOWN: u8 = 70;
+pub(crate) const CLEAR: u8 = 60;
+pub(crate) const DUPLICATE: u8 = 50;
+pub(crate) const QUANTISE: u8 = 40;
+pub(crate) const FIXED_LENGTH: u8 = 30;
+pub(crate) const PLAY: u8 = 20;
+pub(crate) const RECORD: u8 = 10;
+pub(crate) const MUTE: u8 = 102;
+pub(crate) const SOLO: u8 = 103;
+pub(crate) const CUSTOM: u8 = 96;
 
 // Right column (scene buttons), top to bottom.
-const SCENE_SCALE: u8 = 89;
-const SCENE_PROBABILITY: u8 = 79;
-const SCENE_RATE: u8 = 69;
-const SCENE_RANDOM: u8 = 59;
-const SCENE_LENGTH: u8 = 49;
-const SCENE_OCTAVE: u8 = 39;
-const SCENE_VELOCITY: u8 = 29;
-const SCENE_NOTES: u8 = 19;
+pub(crate) const SCENE_SCALE: u8 = 89;
+pub(crate) const SCENE_PROBABILITY: u8 = 79;
+pub(crate) const SCENE_RATE: u8 = 69;
+pub(crate) const SCENE_RANDOM: u8 = 59;
+pub(crate) const SCENE_LENGTH: u8 = 49;
+pub(crate) const SCENE_OCTAVE: u8 = 39;
+pub(crate) const SCENE_VELOCITY: u8 = 29;
+pub(crate) const SCENE_NOTES: u8 = 19;
 
 const TRACK_COLOURS: [u32; TRACKS] = [0xff2020, 0x20ff40, 0x2070ff, 0xffa000, 0xc030ff];
 const WHITE: u32 = 0xffffff;
@@ -49,6 +49,7 @@ const YELLOW: u32 = 0xffe000;
 const RATE_COLOURS: [u32; 8] = [
     0x0040ff, 0x6020ff, 0x00c0ff, 0x40a0ff, 0x00ff60, 0x80ff40, 0xffc000, 0xff8040,
 ];
+#[cfg_attr(not(feature = "persistence"), allow(dead_code))]
 const MESSAGE_US: u64 = 600_000;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -64,6 +65,7 @@ pub enum Lane {
 enum Overlay {
     None,
     Scale,
+    #[cfg(feature = "persistence")]
     Projects,
 }
 
@@ -75,7 +77,7 @@ pub(crate) struct Ui {
     voice: [u8; TRACKS],
     overlay: Overlay,
     shift: bool,
-    record: bool,
+    pub(crate) record: bool,
     clear: bool,
     mute: bool,
     solo: bool,
@@ -84,7 +86,9 @@ pub(crate) struct Ui {
     hold_probability: bool,
     held_block: Option<u8>,
     preview: Option<(u8, u8, u8)>,
+    #[cfg_attr(not(feature = "persistence"), allow(dead_code))]
     current_slot: Option<u8>,
+    #[cfg_attr(not(feature = "persistence"), allow(dead_code))]
     slot_used: [bool; PROJECT_SLOTS as usize],
     message: Option<(u8, u32, u64)>,
 }
@@ -132,6 +136,7 @@ impl Ui {
         }
     }
 
+    #[cfg_attr(not(feature = "persistence"), allow(dead_code))]
     fn flash_message(&mut self, index: u8, colour: u32) {
         self.message = Some((index, colour, self.now_us + MESSAGE_US));
     }
@@ -256,6 +261,7 @@ pub(crate) fn button(
         }
         DUPLICATE => track.duplicate_loop(),
         QUANTISE | SCENE_RATE => track.rate = (track.rate + 1) % RATE_PULSES.len() as u8,
+        #[cfg(feature = "persistence")]
         PROJECTS => {
             ui.overlay = if ui.overlay == Overlay::Projects {
                 Overlay::None
@@ -297,6 +303,37 @@ pub(crate) fn button(
     }
 }
 
+/// Selects the previous or next track (wrapping). For surfaces without the
+/// five dedicated track buttons.
+pub(crate) fn step_track(seq: &mut Seq95, forward: bool, out: &mut impl MidiOut) {
+    let current = seq.ui.track;
+    let next = if forward {
+        (current + 1) % TRACKS
+    } else {
+        (current + TRACKS - 1) % TRACKS
+    };
+    seq.ui.stop_preview(&seq.project, out);
+    seq.ui.track = next;
+    seq.ui.held_block = None;
+}
+
+/// Mute, solo and clear act on the selected track directly, because surfaces
+/// without the track buttons cannot hold a modifier and tap a track.
+pub(crate) fn toggle_mute_current(seq: &mut Seq95) {
+    let track = &mut seq.project.tracks[seq.ui.track];
+    track.muted = !track.muted;
+}
+
+pub(crate) fn toggle_solo_current(seq: &mut Seq95) {
+    let track = &mut seq.project.tracks[seq.ui.track];
+    track.solo = !track.solo;
+}
+
+pub(crate) fn clear_current(seq: &mut Seq95) {
+    seq.project.tracks[seq.ui.track].clear_steps();
+}
+
+#[cfg_attr(not(feature = "persistence"), allow(unused_variables))]
 fn grid_event(
     seq: &mut Seq95,
     row: u8,
@@ -325,6 +362,7 @@ fn grid_event(
             }
             return;
         }
+        #[cfg(feature = "persistence")]
         Overlay::Projects => {
             if pressed {
                 projects_press(seq, row, col, out, storage);
@@ -577,6 +615,7 @@ fn transpose_press(seq: &mut Seq95, row: u8, col: u8) {
     }
 }
 
+#[cfg(feature = "persistence")]
 fn projects_press(
     seq: &mut Seq95,
     row: u8,
@@ -669,6 +708,7 @@ pub(crate) fn render(seq: &Seq95, frame: &mut [u32; LED_COUNT]) {
     } else {
         match ui.overlay {
             Overlay::Scale => render_scale(seq, frame),
+            #[cfg(feature = "persistence")]
             Overlay::Projects => render_projects(seq, frame),
             Overlay::None => match track.kind {
                 TrackKind::Melodic => render_melodic(seq, frame),
@@ -715,7 +755,10 @@ pub(crate) fn render(seq: &Seq95, frame: &mut [u32; LED_COUNT]) {
     frame[LEFT as usize] = 0x181818;
     frame[RIGHT as usize] = 0x181818;
     frame[CUSTOM as usize] = MAGENTA;
-    frame[PROJECTS as usize] = if ui.overlay == Overlay::Projects { WHITE } else { 0x181818 };
+    #[cfg(feature = "persistence")]
+    {
+        frame[PROJECTS as usize] = if ui.overlay == Overlay::Projects { WHITE } else { 0x181818 };
+    }
 
     // Bottom function row.
     frame[MUTE as usize] = if ui.mute { RED } else { 0x200000 };
@@ -982,6 +1025,7 @@ fn render_transpose(seq: &Seq95, frame: &mut [u32; LED_COUNT]) {
     frame[grid(8, 8) as usize] = if tr == 0 { WHITE } else { 0x202020 };
 }
 
+#[cfg(feature = "persistence")]
 fn render_projects(seq: &Seq95, frame: &mut [u32; LED_COUNT]) {
     for slot in 0..PROJECT_SLOTS {
         let current = seq.ui.current_slot == Some(slot);

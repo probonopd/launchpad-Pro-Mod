@@ -1,0 +1,12 @@
+[package]
+name = "safestore"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "Power-fail-safe storage of a few records in a small, fixed window of a NOR flash chip"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

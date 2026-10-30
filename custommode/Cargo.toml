@@ -1,0 +1,12 @@
+[package]
+name = "custommode"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "Launchpad Custom Modes: pads and faders that send notes, CC and program changes"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

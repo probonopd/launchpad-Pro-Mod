@@ -5,6 +5,13 @@ use crate::app::{AftertouchEvent, App, AppId, MidiEvent, SurfaceEvent};
 use crate::sys::led;
 use crate::utils::layout::dr_to_xy;
 
+// The Launchpad X starts in Note Mode, where the pads are lit and playable; the
+// plain Performance mode leaves them dark until a program lights them.
+#[cfg(feature = "launchpad-x")]
+const FIRST_APP: AppId = AppId::Note;
+#[cfg(not(feature = "launchpad-x"))]
+const FIRST_APP: AppId = AppId::Performance;
+
 #[cfg(feature = "launchpad-mini-mk3")]
 static BOOT_DATA: &[u8] = include_bytes!("../../../animations/launchpad-mini-mk3.bin");
 
@@ -67,7 +74,7 @@ impl App for BootApp {
 
     fn on_tick(&mut self) {
         if self.data.len() < 4 {
-            self.requested_switch = Some(AppId::Performance);
+            self.requested_switch = Some(FIRST_APP);
             return;
         }
 
@@ -128,7 +135,7 @@ impl App for BootApp {
         }
 
         if self.tick >= end_tick {
-            self.requested_switch = Some(AppId::Performance);
+            self.requested_switch = Some(FIRST_APP);
             return;
         }
 

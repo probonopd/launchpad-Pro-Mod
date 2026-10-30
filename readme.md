@@ -9,6 +9,12 @@ CoreFW is a full reimplementation of the firmware for the Novation Launchpad dev
 > [!NOTE]
 > This project does not redistribute official Novation firmware. CoreFW is custom firmware built through reverse engineering and independent reimplementation of the original firmware. This project is not affiliated with Novation.
 
+> [!IMPORTANT]
+> **Tested on the Launchpad X only.** The Launchpad X port (Note Mode, Custom Modes,
+> the two sequencers, saving, the Setup extras) was developed and tested on one
+> Launchpad X and on no other model. The other models compile but have not been run
+> by us. See [docs/tested-hardware.md](docs/tested-hardware.md).
+
 ## Installation
 
 Visit [fw.anthonyhfm.dev](https://fw.anthonyhfm.dev) for a step-by-step installation guide that walks you through flashing CoreFW onto your Launchpad.
@@ -43,6 +49,14 @@ Launchpad95-style hardware step sequencer with 5 tracks (drum or melodic),
 per-step probability, live transposition, scales, internal/external clock and
 8 project slots. Press **Custom** to enter and leave it; it keeps playing in
 the background. See [docs/seq95.md](docs/seq95.md) for the full guide.
+
+## Launchpad X (this fork)
+
+The Launchpad X build of this fork starts in a **Note Mode** (Chromatic, Scale, Drum and
+Chord layouts), has eight built-in **Custom Modes** (faders, drum rack, keyboard, program
+changes), the **Seq95 sequencer** (Capture MIDI + Custom) and a Session tap for Ableton Live.
+Start with the **[User Manual](docs/user-manual.md)**; all documents are listed in
+[docs/README.md](docs/README.md). Build it with `cargo lpx`.
 
 Changes made in this fork (GPL-3.0 §5): the new `seq95/` crate, `src/app/seq95/`,
 the Custom-button and MIDI routing in `src/app/host.rs`, and project-slot

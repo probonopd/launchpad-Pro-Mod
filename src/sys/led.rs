@@ -309,6 +309,15 @@ pub fn clear() {
     driver::fill(0x0);
 }
 
+/// Sends every stored color to the LEDs again, e.g. after something else drew on them.
+pub fn redraw() {
+    LED_STATE.with(|state| {
+        for index in 0..LED_COUNT {
+            render_color(index as u8, state.base[index]);
+        }
+    });
+}
+
 pub fn tick() {
     LED_STATE.with(|state| {
         state.tempo_timer = state.tempo_timer.saturating_add(1);

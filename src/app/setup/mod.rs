@@ -4,6 +4,8 @@
 pub mod page;
 pub mod page_init;
 pub mod page_leds;
+#[cfg(feature = "launchpad-x")]
+pub mod page_midi;
 
 #[cfg(feature = "pressure-sensitive")]
 pub mod page_aftertouch;
@@ -18,6 +20,8 @@ use crate::app::events::{AftertouchEvent, MidiEvent, SurfaceEvent};
 use crate::app::setup::page::{Page, PageId};
 use crate::app::setup::page_init::InitPage;
 use crate::app::setup::page_leds::LedsPage;
+#[cfg(feature = "launchpad-x")]
+use crate::app::setup::page_midi::MidiPage;
 use crate::driver;
 use crate::sys::led;
 use crate::sys::settings;
@@ -31,6 +35,8 @@ pub struct SetupApp {
     page: PageId,
     init_page: InitPage,
     leds_page: LedsPage,
+    #[cfg(feature = "launchpad-x")]
+    midi_page: MidiPage,
     #[cfg(feature = "pressure-sensitive")]
     velocity_page: VelocityPage,
     #[cfg(feature = "pressure-sensitive")]
@@ -43,6 +49,8 @@ impl SetupApp {
             page: PageId::Init,
             init_page: InitPage::new(),
             leds_page: LedsPage::new(),
+            #[cfg(feature = "launchpad-x")]
+            midi_page: MidiPage::new(),
             #[cfg(feature = "pressure-sensitive")]
             velocity_page: VelocityPage::new(),
             #[cfg(feature = "pressure-sensitive")]
@@ -54,6 +62,8 @@ impl SetupApp {
         match self.page {
             PageId::Init => &mut self.init_page,
             PageId::Leds => &mut self.leds_page,
+            #[cfg(feature = "launchpad-x")]
+            PageId::Midi => &mut self.midi_page,
             #[cfg(feature = "pressure-sensitive")]
             PageId::Velocity => &mut self.velocity_page,
             #[cfg(feature = "pressure-sensitive")]
@@ -65,6 +75,8 @@ impl SetupApp {
         match index {
             89 => Some(PageId::Init),
             79 => Some(PageId::Leds),
+            #[cfg(feature = "launchpad-x")]
+            49 => Some(PageId::Midi),
             #[cfg(feature = "pressure-sensitive")]
             69 => Some(PageId::Velocity),
             #[cfg(feature = "pressure-sensitive")]
@@ -85,6 +97,8 @@ impl SetupApp {
             },
         );
         led::set_raw(79, 0x101014);
+        #[cfg(feature = "launchpad-x")]
+        led::set_raw(49, 0x101014);
 
         // Velocity and Aftertouch tabs only on pressure-sensitive devices
         #[cfg(feature = "pressure-sensitive")]
@@ -110,6 +124,8 @@ impl SetupApp {
     pub fn finish_setup(&mut self) -> Option<AppId> {
         led::clear();
         settings::save();
+        #[cfg(feature = "launchpad-x")]
+        crate::sys::prefs::save();
         self.init_page.take_selected_mode()
     }
 }

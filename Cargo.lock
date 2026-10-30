@@ -116,6 +116,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "critical-section",
+ "custommode",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
@@ -126,7 +127,10 @@ dependencies = [
  "embedded-hal-nb",
  "embedded-storage",
  "heapless",
+ "notemode",
+ "novseq",
  "panic-halt",
+ "safestore",
  "seq95",
  "spi-memory",
  "static_cell",
@@ -171,6 +175,10 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
+name = "custommode"
+version = "0.1.0"
 
 [[package]]
 name = "darling"
@@ -659,6 +667,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
 
 [[package]]
+name = "notemode"
+version = "0.1.0"
+
+[[package]]
+name = "novseq"
+version = "0.1.0"
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -773,6 +789,10 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+
+[[package]]
+name = "safestore"
+version = "0.1.0"
 
 [[package]]
 name = "scoped-tls"

@@ -6,12 +6,25 @@ pub mod boot;
 pub mod daw;
 pub mod events;
 pub mod host;
+#[cfg(feature = "launchpad-x")]
+pub mod custom;
+#[cfg(feature = "launchpad-x")]
+pub mod note;
 pub mod palette_editor;
 pub mod performance;
 pub mod programmer;
-#[cfg(feature = "launchpad-pro-mk3")]
+#[cfg(any(feature = "launchpad-pro-mk3", all(feature = "launchpad-x", feature = "sequencer-launchpad95")))]
 pub mod seq95;
+#[cfg(all(feature = "launchpad-x", feature = "sequencer-novation"))]
+pub mod novseq;
+#[cfg(feature = "launchpad-x")]
+pub mod sequencer;
 pub mod setup;
+
+#[cfg(all(feature = "launchpad-x", feature = "sequencer-launchpad95", feature = "sequencer-novation"))]
+compile_error!("choose exactly one sequencer style: sequencer-launchpad95 or sequencer-novation");
+#[cfg(all(feature = "launchpad-x", not(feature = "sequencer-launchpad95"), not(feature = "sequencer-novation")))]
+compile_error!("choose a sequencer style: sequencer-launchpad95 or sequencer-novation");
 
 pub use crate::sys::midi::MidiPort;
 pub use apptrait::App;
@@ -27,6 +40,10 @@ pub enum AppId {
     Programmer,
     Daw,
     PaletteEditor,
-    #[cfg(feature = "launchpad-pro-mk3")]
+    #[cfg(any(feature = "launchpad-pro-mk3", feature = "launchpad-x"))]
     Seq95,
+    #[cfg(feature = "launchpad-x")]
+    Note,
+    #[cfg(feature = "launchpad-x")]
+    Custom,
 }

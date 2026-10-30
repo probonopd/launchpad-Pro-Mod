@@ -38,6 +38,10 @@ impl Driver for RuntimeDriver {
         self.grid().fill(color);
     }
 
+    fn set_blank(&mut self, blank: bool) {
+        self.grid().set_blank(blank);
+    }
+
     fn brightness(&mut self) -> u8 {
         self.grid().brightness()
     }
@@ -58,6 +62,34 @@ impl Driver for RuntimeDriver {
         if self.flash.read(offset, data).is_err() {
             data.fill(0xff);
         }
+    }
+
+    #[cfg(feature = "diag")]
+    fn read_flash_checked(&mut self, offset: u32, data: &mut [u8]) -> bool {
+        self.flash.read_physical(offset, data)
+    }
+
+    #[cfg(feature = "diag")]
+    fn flash_physical_size(&mut self) -> u32 {
+        crate::sys::driver::common::storage::external::TOTAL_SIZE
+    }
+
+    #[cfg(feature = "diag")]
+    fn flash_jedec(&mut self) -> Option<[u8; 3]> {
+        let info = self.flash.info();
+        if info.present { Some(info.jedec_id) } else { None }
+    }
+
+    fn store_read(&mut self, offset: u32, data: &mut [u8]) -> bool {
+        self.flash.store_read(offset, data)
+    }
+
+    fn store_erase_sector(&mut self, sector: usize) -> bool {
+        self.flash.store_erase_sector(sector)
+    }
+
+    fn store_program(&mut self, offset: u32, data: &[u8]) -> bool {
+        self.flash.store_program(offset, data)
     }
 
     fn write_flash(&mut self, offset: u32, data: &[u8]) {

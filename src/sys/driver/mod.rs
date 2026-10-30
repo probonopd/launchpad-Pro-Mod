@@ -112,12 +112,46 @@ pub trait Driver {
         );
     }
     fn fill(&mut self, color: u32);
+    /// Turns all LEDs dark without touching their stored colors (LED sleep). Only the
+    /// Launchpad X implements it.
+    fn set_blank(&mut self, _blank: bool) {}
     fn brightness(&mut self) -> u8;
     fn set_brightness(&mut self, brightness: u8);
     fn send_midi(&mut self, port: MidiPort, data: &[u8]);
     fn flash_size(&mut self) -> u32;
     fn read_flash(&mut self, offset: u32, data: &mut [u8]);
     fn write_flash(&mut self, offset: u32, data: &[u8]);
+    /// Reads from the window for saved data; offsets are relative to the window.
+    #[cfg(feature = "launchpad-x")]
+    fn store_read(&mut self, _offset: u32, _data: &mut [u8]) -> bool {
+        false
+    }
+    /// Erases one sector of the window for saved data.
+    #[cfg(feature = "launchpad-x")]
+    fn store_erase_sector(&mut self, _sector: usize) -> bool {
+        false
+    }
+    /// Programs bytes inside one page of the window for saved data.
+    #[cfg(feature = "launchpad-x")]
+    fn store_program(&mut self, _offset: u32, _data: &[u8]) -> bool {
+        false
+    }
+    /// Reads the whole external flash chip at a physical offset (not just the
+    /// settings window) and reports a failed read instead of returning 0xff data.
+    #[cfg(feature = "diag")]
+    fn read_flash_checked(&mut self, _offset: u32, _data: &mut [u8]) -> bool {
+        false
+    }
+    /// Size of the whole external flash chip as the firmware knows it.
+    #[cfg(feature = "diag")]
+    fn flash_physical_size(&mut self) -> u32 {
+        0
+    }
+    /// JEDEC id (manufacturer, type, capacity) of the external flash chip, if it answers.
+    #[cfg(feature = "diag")]
+    fn flash_jedec(&mut self) -> Option<[u8; 3]> {
+        None
+    }
     fn prepare_settings_storage(&mut self, _wire_size: usize, _validate: fn(&[u8]) -> bool) {}
     fn device_id(&self) -> u8;
     fn highspeed_leds_enabled(&self) -> bool {
@@ -212,6 +246,10 @@ pub fn fill(color: u32) {
     let _ = with(|driver| driver.fill(color));
 }
 
+pub fn set_blank(blank: bool) {
+    let _ = with(|driver| driver.set_blank(blank));
+}
+
 pub fn brightness() -> u8 {
     with(|driver| driver.brightness()).unwrap_or(7)
 }
@@ -230,6 +268,36 @@ pub fn flash_size() -> u32 {
 
 pub fn read_flash(offset: u32, data: &mut [u8]) {
     let _ = with(|driver| driver.read_flash(offset, data));
+}
+
+#[cfg(feature = "diag")]
+pub fn read_flash_checked(offset: u32, data: &mut [u8]) -> bool {
+    with(|driver| driver.read_flash_checked(offset, data)).unwrap_or(false)
+}
+
+#[cfg(feature = "diag")]
+pub fn flash_physical_size() -> u32 {
+    with(|driver| driver.flash_physical_size()).unwrap_or(0)
+}
+
+#[cfg(feature = "diag")]
+pub fn flash_jedec() -> Option<[u8; 3]> {
+    with(|driver| driver.flash_jedec()).flatten()
+}
+
+#[cfg(feature = "launchpad-x")]
+pub fn store_read(offset: u32, data: &mut [u8]) -> bool {
+    with(|driver| driver.store_read(offset, data)).unwrap_or(false)
+}
+
+#[cfg(feature = "launchpad-x")]
+pub fn store_erase_sector(sector: usize) -> bool {
+    with(|driver| driver.store_erase_sector(sector)).unwrap_or(false)
+}
+
+#[cfg(feature = "launchpad-x")]
+pub fn store_program(offset: u32, data: &[u8]) -> bool {
+    with(|driver| driver.store_program(offset, data)).unwrap_or(false)
 }
 
 pub fn write_flash(offset: u32, data: &[u8]) {

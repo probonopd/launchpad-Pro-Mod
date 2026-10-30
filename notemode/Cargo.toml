@@ -1,0 +1,12 @@
+[package]
+name = "notemode"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "Launchpad Note Mode core: chromatic, scale and drum layouts for an 8x8 grid"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

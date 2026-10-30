@@ -9,6 +9,9 @@ use crate::sys::{led, settings};
 const TOGGLE_BUTTON: u8 = 31;
 const CURVE_START: u8 = 21;
 const CURVE_END: u8 = 23;
+// Pad trigger threshold, four levels (light to firm), row 5.
+#[cfg(feature = "launchpad-x")]
+const TRIGGER_START: u8 = 51;
 
 pub struct VelocityPage {
     text: Text,
@@ -42,6 +45,14 @@ impl VelocityPage {
         } else {
             for i in 0..3u8 {
                 led::set(CURVE_START + i, 0x000000);
+            }
+        }
+
+        #[cfg(feature = "launchpad-x")]
+        {
+            let level = crate::sys::prefs::get().trigger;
+            for i in 0..crate::sys::prefs::TRIGGER_LEVELS {
+                led::set(TRIGGER_START + i, if i == level { 0xffffff } else { 0x101010 });
             }
         }
     }

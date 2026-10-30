@@ -3,6 +3,10 @@ members = [
   ".",
   "xtask",
   "seq95",
+  "novseq",
+  "notemode",
+  "custommode",
+  "safestore",
 ]
 default-members = ["."]
 resolver = "2"
@@ -58,15 +62,32 @@ heapless = { version = "0.9.3", optional = true }
 spi-memory = { version = "0.2.0", optional = true }
 static_cell = { version = "2.1.1", optional = true }
 stm32-metapac = { version = "21.0.0", optional = true }
-seq95 = { path = "seq95", optional = true }
+seq95 = { path = "seq95", optional = true, default-features = false }
+novseq = { path = "novseq", optional = true }
+notemode = { path = "notemode", optional = true }
+custommode = { path = "custommode", optional = true }
+safestore = { path = "safestore", optional = true }
 
 [features]
 default = []
 no-setup-btn = []
 pressure-sensitive = []
 rgb-color = []
+# Read-only flash dump over SysEx (Launchpad X only). Not part of normal builds.
+diag = []
+
+# Launchpad X sequencer style, exactly one per build (cargo lpx picks it from
+# LPX_SEQUENCER, default launchpad95).
+sequencer-launchpad95 = []
+sequencer-novation = []
 
 launchpad-x = [
+  "dep:seq95",
+  "dep:novseq",
+  "dep:notemode",
+  "dep:custommode",
+  "dep:safestore",
+  "seq95/persistence",
   "no-setup-btn",
   "pressure-sensitive",
   "rgb-color",
@@ -144,6 +165,7 @@ launchpad-pro = [
 ]
 
 launchpad-pro-mk3 = [
+  "seq95/persistence",
   "pressure-sensitive",
   "dep:seq95",
   "rgb-color",
@@ -196,3 +218,16 @@ panic = "abort"
 [profile.dev]
 opt-level = "z"
 lto = "fat"
+
+# Seq95 is not timing critical; size matters on the Launchpad X (80 KB app region).
+[profile.release.package.seq95]
+opt-level = "z"
+
+[profile.release.package.notemode]
+opt-level = "z"
+
+[profile.release.package.custommode]
+opt-level = "z"
+
+[profile.release.package.safestore]
+opt-level = "z"

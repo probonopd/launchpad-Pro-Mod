@@ -41,16 +41,15 @@ impl Storage for MemStorage {
     fn slot_used(&mut self, slot: u8) -> bool {
         self.slots.contains_key(&slot)
     }
-    fn save(&mut self, slot: u8, data: &[u8]) -> bool {
-        self.slots.insert(slot, data.to_vec());
+    fn save_with(&mut self, slot: u8, fill: impl FnOnce(&mut [u8]) -> usize) -> bool {
+        let mut buf = vec![0u8; 8192];
+        let len = fill(&mut buf);
+        self.slots.insert(slot, buf[..len].to_vec());
         true
     }
-    fn load(&mut self, slot: u8, buf: &mut [u8]) -> bool {
+    fn load_with(&mut self, slot: u8, apply: impl FnOnce(&[u8]) -> bool) -> bool {
         match self.slots.get(&slot) {
-            Some(d) => {
-                buf[..d.len()].copy_from_slice(d);
-                true
-            }
+            Some(d) => apply(d),
             None => false,
         }
     }
@@ -421,4 +420,140 @@ fn duplicate_extends_loop() {
     t.duplicate_loop();
     assert_eq!(t.loop_end, 3);
     assert!(t.mel[19].on);
+}
+
+mod xsurface {
+    use super::*;
+    use crate::xmap::*;
+
+    fn setup() -> (Seq95, XSurface, Recorder, MemStorage) {
+        (Seq95::new(), XSurface::new(), Recorder::default(), MemStorage::default())
+    }
+
+    #[test]
+    fn up_down_select_tracks_and_wrap() {
+        let (mut seq, mut x, mut out, mut st) = setup();
+        x.button(&mut seq, X_DOWN, true, 100, &mut out, &mut st);
+        assert_eq!(seq.current_track(), 1);
+        x.button(&mut seq, X_UP, true, 100, &mut out, &mut st);
+        x.button(&mut seq, X_UP, true, 100, &mut out, &mut st);
+        assert_eq!(seq.current_track(), crate::TRACKS - 1);
+    }
+
+    #[test]
+    fn shift_up_transposes_instead_of_changing_track() {
+        let (mut seq, mut x, mut out, mut st) = setup();
+        x.button(&mut seq, X_CAPTURE, true, 100, &mut out, &mut st);
+        x.button(&mut seq, X_UP, true, 100, &mut out, &mut st);
+        x.button(&mut seq, X_CAPTURE, false, 0, &mut out, &mut st);
+        assert_eq!(seq.current_track(), 0);
+        assert_eq!(seq.project.transpose, 12);
+    }
+
+    #[test]
+    fn tapped_mute_and_solo_act_on_current_track() {
+        let (mut seq, mut x, mut out, mut st) = setup();
+        x.button(&mut seq, X_DOWN, true, 100, &mut out, &mut st);
+        x.button(&mut seq, X_CAPTURE, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 59, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 59, false, 0, &mut out, &mut st);
+        x.button(&mut seq, 69, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 69, false, 0, &mut out, &mut st);
+        x.button(&mut seq, X_CAPTURE, false, 0, &mut out, &mut st);
+        assert!(seq.project.tracks[1].muted);
+        assert!(seq.project.tracks[1].solo);
+        assert!(!seq.project.tracks[0].muted);
+    }
+
+    #[test]
+    fn held_mute_mutes_a_step_not_the_track() {
+        let (mut seq, mut x, mut out, mut st) = setup();
+        // Track 2 is melodic (track 1 is drums).
+        x.button(&mut seq, X_DOWN, true, 100, &mut out, &mut st);
+        // Put a note on step 1 (row 2 = a scale degree, column 1), Notes lane.
+        x.button(&mut seq, 21, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 21, false, 0, &mut out, &mut st);
+        // Shift + Mute, release Shift, tap the step, release Mute.
+        x.button(&mut seq, X_CAPTURE, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 59, true, 100, &mut out, &mut st);
+        x.button(&mut seq, X_CAPTURE, false, 0, &mut out, &mut st);
+        x.button(&mut seq, 21, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 21, false, 0, &mut out, &mut st);
+        x.button(&mut seq, 59, false, 0, &mut out, &mut st);
+        assert!(!seq.project.tracks[1].muted, "the track must not be muted");
+        assert!(seq.project.tracks[1].mel[0].muted, "the step must be muted");
+    }
+
+    #[test]
+    fn held_clear_erases_a_step_and_a_tap_clears_the_track() {
+        let (mut seq, mut x, mut out, mut st) = setup();
+        // Track 2 is melodic (track 1 is drums).
+        x.button(&mut seq, X_DOWN, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 21, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 21, false, 0, &mut out, &mut st);
+        assert!(seq.project.tracks[1].mel[0].on);
+        // Held Clear + step.
+        x.button(&mut seq, X_CAPTURE, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 29, true, 100, &mut out, &mut st);
+        x.button(&mut seq, X_CAPTURE, false, 0, &mut out, &mut st);
+        x.button(&mut seq, 21, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 21, false, 0, &mut out, &mut st);
+        x.button(&mut seq, 29, false, 0, &mut out, &mut st);
+        assert!(!seq.project.tracks[1].mel[0].on);
+        // Put it back and tap Clear alone: the whole track is erased.
+        x.button(&mut seq, 21, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 21, false, 0, &mut out, &mut st);
+        x.button(&mut seq, X_CAPTURE, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 29, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 29, false, 0, &mut out, &mut st);
+        x.button(&mut seq, X_CAPTURE, false, 0, &mut out, &mut st);
+        assert!(!seq.project.tracks[1].mel[0].on);
+    }
+
+    #[test]
+    fn release_follows_the_layer_chosen_at_press() {
+        let (mut seq, mut x, mut out, mut st) = setup();
+        // Shift + row 1 = Record (hold); let Shift go first, then the button.
+        x.button(&mut seq, X_CAPTURE, true, 100, &mut out, &mut st);
+        x.button(&mut seq, 19, true, 100, &mut out, &mut st);
+        x.button(&mut seq, X_CAPTURE, false, 0, &mut out, &mut st);
+        x.button(&mut seq, 19, false, 0, &mut out, &mut st);
+        assert!(!seq.ui.record, "Record stuck after Shift was released first");
+    }
+
+    #[test]
+    fn render_stays_inside_the_x_led_range() {
+        let (seq, x, _, _) = setup();
+        let mut frame = [0u32; X_LED_COUNT];
+        x.render(&seq, &mut frame);
+        // The Custom button is lit and nothing is written at 99 (no LED).
+        assert_ne!(frame[X_CUSTOM as usize], 0);
+        assert_eq!(frame[99], 0);
+    }
+
+    #[test]
+    fn unknown_indexes_are_ignored() {
+        let (mut seq, mut x, mut out, mut st) = setup();
+        for index in [0u8, 9, 10, 20, 90, 95, 99, 100, 200, 255] {
+            x.button(&mut seq, index, true, 100, &mut out, &mut st);
+            x.button(&mut seq, index, false, 0, &mut out, &mut st);
+        }
+        assert_eq!(seq.current_track(), 0);
+    }
+}
+
+#[test]
+fn a_new_project_matches_the_default_tracks() {
+    let p = Project::new();
+    for i in 0..TRACKS {
+        let d = Project::default_track(i);
+        assert_eq!(p.tracks[i].kind, d.kind, "track {i}");
+        assert_eq!(p.tracks[i].channel, d.channel, "track {i}");
+        assert_eq!(p.tracks[i].ports, d.ports);
+        assert_eq!(p.tracks[i].rate, d.rate);
+        assert_eq!(p.tracks[i].loop_end, d.loop_end);
+        assert_eq!(p.tracks[i].drum_base, d.drum_base);
+        assert!(p.tracks[i].mel == d.mel && p.tracks[i].drum == d.drum);
+    }
+    assert_eq!((p.bpm, p.send_clock, p.transpose_channel), (120, false, 15));
 }

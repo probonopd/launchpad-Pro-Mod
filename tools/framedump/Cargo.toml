@@ -1,0 +1,15 @@
+[package]
+name = "framedump"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "GPL-3.0-only"
+description = "Prints the LED frames of the Launchpad X modes as JSON, for the pictures in the manual"
+
+[dependencies]
+notemode = { path = "../../notemode" }
+custommode = { path = "../../custommode" }
+seq95 = { path = "../../seq95" }
+
+# Not a member of the firmware workspace: this is a host tool.
+[workspace]

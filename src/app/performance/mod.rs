@@ -40,17 +40,7 @@ impl App for PerformanceApp {
             return;
         }
 
-        let velocity = settings::with(|settings| {
-            if event.pressed {
-                if settings.velocity_enabled != 0 {
-                    apply_velocity_curve(settings.velocity_curve, event.value)
-                } else {
-                    127
-                }
-            } else {
-                0
-            }
-        });
+        let velocity = if event.pressed { pad_velocity(event.value) } else { 0 };
 
         driver::send_midi(MidiPort::Midi, &[0x90, note, velocity]);
     }
@@ -150,6 +140,17 @@ impl App for PerformanceApp {
     }
 
     fn on_tick(&mut self) {}
+}
+
+/// Velocity to send for a pad press, following the velocity settings.
+pub(crate) fn pad_velocity(raw: u8) -> u8 {
+    settings::with(|settings| {
+        if settings.velocity_enabled != 0 {
+            apply_velocity_curve(settings.velocity_curve, raw)
+        } else {
+            127
+        }
+    })
 }
 
 pub(crate) fn apply_velocity_curve(curve: u8, value: u8) -> u8 {

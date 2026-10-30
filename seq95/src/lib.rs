@@ -13,6 +13,7 @@
 pub mod engine;
 pub mod model;
 mod ui;
+pub mod xmap;
 
 pub use engine::{Engine, MidiOut};
 pub use model::*;
@@ -25,17 +26,21 @@ pub const PROJECT_SLOTS: u8 = 8;
 pub trait Storage {
     /// True if the slot holds something that looks like a saved project.
     fn slot_used(&mut self, slot: u8) -> bool;
-    /// Writes `data` to the slot. Returns false if the write failed or was refused.
-    fn save(&mut self, slot: u8, data: &[u8]) -> bool;
-    /// Fills `buf` from the slot. Returns false if nothing could be read.
-    fn load(&mut self, slot: u8, buf: &mut [u8]) -> bool;
+    /// Lets `fill` write an encoded project (at most `PROJECT_WIRE_SIZE` bytes) into a
+    /// temporary buffer and writes the bytes it reports to the slot. Returns false if
+    /// the write failed or was refused. The buffer belongs to the host and is only
+    /// needed for the moment of saving: a 7 KB buffer inside `Seq95` once made the
+    /// startup of a small device run out of stack.
+    fn save_with(&mut self, slot: u8, fill: impl FnOnce(&mut [u8]) -> usize) -> bool;
+    /// Reads the slot into a temporary buffer and lets `apply` use it. Returns false
+    /// if nothing could be read or `apply` refused the data.
+    fn load_with(&mut self, slot: u8, apply: impl FnOnce(&[u8]) -> bool) -> bool;
 }
 
 pub struct Seq95 {
     pub project: Project,
     pub engine: Engine,
     ui: ui::Ui,
-    scratch: [u8; PROJECT_WIRE_SIZE],
 }
 
 impl Seq95 {
@@ -44,7 +49,6 @@ impl Seq95 {
             project: Project::new(),
             engine: Engine::new(),
             ui: ui::Ui::new(),
-            scratch: [0; PROJECT_WIRE_SIZE],
         }
     }
 
@@ -87,23 +91,36 @@ impl Seq95 {
         ui::render(self, frame);
     }
 
+    #[cfg(feature = "persistence")]
     pub fn save_project(&mut self, slot: u8, storage: &mut impl Storage) -> bool {
-        let len = self.project.encode(&mut self.scratch);
-        storage.save(slot, &self.scratch[..len])
+        let project = &self.project;
+        storage.save_with(slot, |buf| project.encode(buf))
     }
 
+    #[cfg(feature = "persistence")]
     pub fn load_project(&mut self, slot: u8, storage: &mut impl Storage, out: &mut impl MidiOut) -> bool {
-        if !storage.load(slot, &mut self.scratch) {
+        let project = &mut self.project;
+        if !storage.load_with(slot, |buf| project.decode_into(buf).is_ok()) {
             return false;
         }
-        match Project::decode(&self.scratch) {
-            Ok(project) => {
-                self.engine.all_notes_off(out);
-                self.project = project;
-                true
-            }
-            Err(_) => false,
-        }
+        self.engine.all_notes_off(out);
+        true
+    }
+
+    pub fn step_track(&mut self, forward: bool, out: &mut impl MidiOut) {
+        ui::step_track(self, forward, out);
+    }
+
+    pub fn toggle_mute_current(&mut self) {
+        ui::toggle_mute_current(self);
+    }
+
+    pub fn toggle_solo_current(&mut self) {
+        ui::toggle_solo_current(self);
+    }
+
+    pub fn clear_current(&mut self) {
+        ui::clear_current(self);
     }
 
     pub fn current_track(&self) -> usize {

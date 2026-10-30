@@ -79,6 +79,8 @@ pub struct Leds {
     pub overlay_g: u8,
     pub overlay_b: u8,
     brightness: u8,
+    /// LED sleep: scan out darkness while the stored colors stay as they are.
+    pub blank: bool,
 }
 
 impl Leds {
@@ -89,6 +91,7 @@ impl Leds {
             overlay_g: 0,
             overlay_b: 0,
             brightness: 8,
+            blank: false,
         }
     }
 

@@ -1,0 +1,10 @@
+[package]
+name = "novseq"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "Novation-style step sequencer core for the Launchpad X (4 tracks, 32 steps, multi-note steps)"
+
+[lib]
+path = "src/lib.rs"

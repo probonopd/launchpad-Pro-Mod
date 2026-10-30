@@ -215,8 +215,23 @@ pub struct Project {
 }
 
 impl Project {
+    /// The track a new project starts with: track 1 drums on channel 10, tracks 2 to 5
+    /// melodic on channels 1 to 4.
+    pub const fn default_track(index: usize) -> Track {
+        match index {
+            0 => Track::new(TrackKind::Drum, 9),
+            1 => Track::new(TrackKind::Melodic, 0),
+            2 => Track::new(TrackKind::Melodic, 1),
+            3 => Track::new(TrackKind::Melodic, 2),
+            _ => Track::new(TrackKind::Melodic, 3),
+        }
+    }
+
     pub const fn new() -> Self {
-        Self {
+        // The tracks differ only in kind and channel, so they are repeated from one
+        // constant and patched in place: building five 1.4 KB tracks separately made
+        // this function use 7 KB of stack, which counts at startup.
+        let mut project = Self {
             bpm: 120,
             root: 0,
             scale: 0,
@@ -224,14 +239,14 @@ impl Project {
             clock: ClockSource::Internal,
             send_clock: false,
             transpose_channel: 15,
-            tracks: [
-                Track::new(TrackKind::Drum, 9),
-                Track::new(TrackKind::Melodic, 0),
-                Track::new(TrackKind::Melodic, 1),
-                Track::new(TrackKind::Melodic, 2),
-                Track::new(TrackKind::Melodic, 3),
-            ],
-        }
+            tracks: [const { Track::new(TrackKind::Melodic, 0) }; TRACKS],
+        };
+        project.tracks[0].kind = TrackKind::Drum;
+        project.tracks[0].channel = 9;
+        project.tracks[2].channel = 1;
+        project.tracks[3].channel = 2;
+        project.tracks[4].channel = 3;
+        project
     }
 
     pub fn scale_notes(&self) -> &'static [u8] {
@@ -282,17 +297,26 @@ impl Default for Project {
 // Serialization
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "persistence")]
 const MAGIC: [u8; 6] = *b"SEQ95P";
+#[cfg(feature = "persistence")]
 const FORMAT_VERSION: u8 = 1;
+#[cfg(feature = "persistence")]
 const HEADER_SIZE: usize = MAGIC.len() + 1 + 4;
+#[cfg(feature = "persistence")]
 const GLOBAL_SIZE: usize = 16;
+#[cfg(feature = "persistence")]
 const TRACK_HEADER_SIZE: usize = 16;
+#[cfg(feature = "persistence")]
 const MEL_STEP_SIZE: usize = 6;
+#[cfg(feature = "persistence")]
 const TRACK_SIZE: usize = TRACK_HEADER_SIZE + STEPS * MEL_STEP_SIZE + VOICES * STEPS;
 
 /// Size of an encoded project in bytes.
+#[cfg(feature = "persistence")]
 pub const PROJECT_WIRE_SIZE: usize = HEADER_SIZE + GLOBAL_SIZE + TRACKS * TRACK_SIZE;
 
+#[cfg(feature = "persistence")]
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum DecodeError {
     TooShort,
@@ -301,6 +325,7 @@ pub enum DecodeError {
     BadChecksum,
 }
 
+#[cfg(feature = "persistence")]
 impl Project {
     pub fn encode(&self, out: &mut [u8]) -> usize {
         assert!(out.len() >= PROJECT_WIRE_SIZE);
@@ -330,6 +355,15 @@ impl Project {
     }
 
     pub fn decode(input: &[u8]) -> Result<Self, DecodeError> {
+        let mut project = Project::new();
+        project.decode_into(input)?;
+        Ok(project)
+    }
+
+    /// Replaces this project by the encoded one. The input is checked completely
+    /// (length, magic, version, CRC) before anything is changed, so a refused input
+    /// leaves the project as it was. It works in place, without a 7 KB temporary.
+    pub fn decode_into(&mut self, input: &[u8]) -> Result<(), DecodeError> {
         if input.len() < PROJECT_WIRE_SIZE {
             return Err(DecodeError::TooShort);
         }
@@ -352,24 +386,25 @@ impl Project {
 
         let body = &input[HEADER_SIZE..];
         let g = &body[..GLOBAL_SIZE];
-        let mut project = Project::new();
-        project.bpm = u16::from_le_bytes([g[0], g[1]]).clamp(MIN_BPM, MAX_BPM);
-        project.root = g[2] % 12;
-        project.scale = g[3] % SCALES.len() as u8;
-        project.transpose = (g[4] as i8).clamp(-MAX_TRANSPOSE, MAX_TRANSPOSE);
-        project.clock = if g[5] == 1 {
+        self.bpm = u16::from_le_bytes([g[0], g[1]]).clamp(MIN_BPM, MAX_BPM);
+        self.root = g[2] % 12;
+        self.scale = g[3] % SCALES.len() as u8;
+        self.transpose = (g[4] as i8).clamp(-MAX_TRANSPOSE, MAX_TRANSPOSE);
+        self.clock = if g[5] == 1 {
             ClockSource::External
         } else {
             ClockSource::Internal
         };
-        project.send_clock = g[6] != 0;
-        project.transpose_channel = if g[7] < 16 { g[7] } else { 0xff };
+        self.send_clock = g[6] != 0;
+        self.transpose_channel = if g[7] < 16 { g[7] } else { 0xff };
 
-        for (i, track) in project.tracks.iter_mut().enumerate() {
+        for (i, track) in self.tracks.iter_mut().enumerate() {
+            // Start from the defaults, as a freshly created project would.
+            *track = Project::default_track(i);
             let start = GLOBAL_SIZE + i * TRACK_SIZE;
             decode_track(track, &body[start..start + TRACK_SIZE]);
         }
-        Ok(project)
+        Ok(())
     }
 }
 
@@ -377,6 +412,7 @@ pub const MIN_BPM: u16 = 30;
 pub const MAX_BPM: u16 = 300;
 pub const MAX_TRANSPOSE: i8 = 36;
 
+#[cfg(feature = "persistence")]
 fn encode_track(track: &Track, out: &mut [u8]) {
     let h = &mut out[..TRACK_HEADER_SIZE];
     h[0] = track.kind as u8;
@@ -408,6 +444,7 @@ fn encode_track(track: &Track, out: &mut [u8]) {
     }
 }
 
+#[cfg(feature = "persistence")]
 fn decode_track(track: &mut Track, input: &[u8]) {
     let h = &input[..TRACK_HEADER_SIZE];
     track.kind = if h[0] == 0 {
@@ -444,11 +481,13 @@ fn decode_track(track: &mut Track, input: &[u8]) {
     }
 }
 
+#[cfg(feature = "persistence")]
 /// True if `bytes` starts with a Seq95 project header (any format version).
 pub fn looks_like_project(bytes: &[u8]) -> bool {
     bytes.len() >= MAGIC.len() && bytes[..MAGIC.len()] == MAGIC
 }
 
+#[cfg(feature = "persistence")]
 pub fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = 0xffff_ffffu32;
     for byte in bytes {

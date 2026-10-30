@@ -7,6 +7,8 @@ use crate::app::SurfaceEvent;
 pub enum PageId {
     Init,
     Leds,
+    #[cfg(feature = "launchpad-x")]
+    Midi,
     #[cfg(feature = "pressure-sensitive")]
     Velocity,
     #[cfg(feature = "pressure-sensitive")]

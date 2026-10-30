@@ -9,4 +9,10 @@ description = "Launchpad95-style hardware step sequencer core (5 tracks, drum + 
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = ["persistence"]
+# Project encode/decode and the Projects overlay. Off on the Launchpad X, which
+# has no reviewed storage layout yet, to save flash and RAM.
+persistence = []
+
 [dependencies]

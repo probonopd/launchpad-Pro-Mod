@@ -95,7 +95,12 @@ impl Grid {
         self.active_mux_bank = mux_bank;
         self.mux_bank = (mux_bank + 1) & 0x07;
 
-        spi3_transfer_8(&self.leds.fb[phase][start..start + 8]);
+        // An all-ones line is dark: the planes are stored inverted (see fb_write_intensity8).
+        if self.leds.blank {
+            spi3_transfer_8(&[0xff; 8]);
+        } else {
+            spi3_transfer_8(&self.leds.fb[phase][start..start + 8]);
+        }
         self.inputs.start_pressure_capture(self.active_mux_bank);
     }
 
@@ -158,6 +163,10 @@ impl Grid {
 
     pub fn fill(&mut self, color: u32) {
         self.leds.fill(color);
+    }
+
+    pub fn set_blank(&mut self, blank: bool) {
+        self.leds.blank = blank;
     }
 
     pub fn brightness(&self) -> u8 {

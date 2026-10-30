@@ -3,11 +3,17 @@
 
 use crate::app::boot::BootApp;
 use crate::app::daw::DawApp;
+#[cfg(feature = "launchpad-x")]
+use crate::app::custom::CustomApp;
+#[cfg(feature = "launchpad-x")]
+use crate::app::note::NoteApp;
 use crate::app::palette_editor::PaletteEditorApp;
 use crate::app::performance::PerformanceApp;
 use crate::app::programmer::ProgrammerApp;
 #[cfg(feature = "launchpad-pro-mk3")]
 use crate::app::seq95::Seq95App;
+#[cfg(feature = "launchpad-x")]
+use crate::app::sequencer::SequencerApp;
 use crate::app::setup::SetupApp;
 use crate::app::{AftertouchEvent, App, AppId, MidiEvent, SurfaceEvent};
 use crate::sys::led;
@@ -21,6 +27,17 @@ const SETUP_HOLD_TICKS: u16 = 500;
 // The Custom button toggles the Seq95 sequencer from any mode.
 #[cfg(feature = "launchpad-pro-mk3")]
 const SEQ95_BUTTON_INDEX: u8 = 96;
+#[cfg(feature = "launchpad-x")]
+const SEQ95_BUTTON_INDEX: u8 = seq95::xmap::X_CUSTOM;
+// The Note button opens Note Mode from Performance, Custom and Session (DAW)
+// mode. Programmer mode belongs to the host software, which needs every button,
+// and in the sequencer the button is Play.
+#[cfg(feature = "launchpad-x")]
+const NOTE_BUTTON_INDEX: u8 = notemode::NOTE;
+// Capture MIDI is the Shift of the sequencer; held with Custom it opens the
+// sequencer, Custom alone opens the Custom Modes.
+#[cfg(feature = "launchpad-x")]
+const CAPTURE_BUTTON_INDEX: u8 = seq95::xmap::X_CAPTURE;
 #[cfg(feature = "no-setup-btn")]
 const SETUP_HOLD_BUTTON_INDEX: u8 = 95;
 #[cfg(not(feature = "no-setup-btn"))]
@@ -36,10 +53,21 @@ pub struct AppHost {
     daw: DawApp,
     pending_host_switch: Option<AppId>,
     palette_editor: PaletteEditorApp,
+    // On the Launchpad X the sequencer (about 9 KB) lives in a static of its own and
+    // is built before the app host: building both in one go needs more stack than
+    // the startup has (see section 31 of docs/lpx-port-safety.md).
     #[cfg(feature = "launchpad-pro-mk3")]
     seq95: Seq95App,
-    #[cfg(feature = "launchpad-pro-mk3")]
+    #[cfg(feature = "launchpad-x")]
+    seq95: &'static mut SequencerApp,
+    #[cfg(any(feature = "launchpad-pro-mk3", feature = "launchpad-x"))]
     seq95_return: AppId,
+    #[cfg(feature = "launchpad-x")]
+    note: NoteApp,
+    #[cfg(feature = "launchpad-x")]
+    custom: CustomApp,
+    #[cfg(feature = "launchpad-x")]
+    capture_down: bool,
     #[cfg(feature = "no-setup-btn")]
     setup_hold_ticks: u16,
     #[cfg(feature = "no-setup-btn")]
@@ -51,7 +79,17 @@ pub struct AppHost {
 }
 
 impl AppHost {
+    #[cfg(not(feature = "launchpad-x"))]
     pub const fn new(current: AppId) -> Self {
+        Self::build(current)
+    }
+
+    #[cfg(feature = "launchpad-x")]
+    pub const fn new_with_sequencer(current: AppId, seq95: &'static mut SequencerApp) -> Self {
+        Self::build(current, seq95)
+    }
+
+    const fn build(current: AppId, #[cfg(feature = "launchpad-x")] seq95: &'static mut SequencerApp) -> Self {
         Self {
             current,
             boot: BootApp::new(),
@@ -63,8 +101,16 @@ impl AppHost {
             palette_editor: PaletteEditorApp::new(),
             #[cfg(feature = "launchpad-pro-mk3")]
             seq95: Seq95App::new(),
-            #[cfg(feature = "launchpad-pro-mk3")]
+            #[cfg(feature = "launchpad-x")]
+            seq95,
+            #[cfg(any(feature = "launchpad-pro-mk3", feature = "launchpad-x"))]
             seq95_return: AppId::Performance,
+            #[cfg(feature = "launchpad-x")]
+            note: NoteApp::new(),
+            #[cfg(feature = "launchpad-x")]
+            custom: CustomApp::new(),
+            #[cfg(feature = "launchpad-x")]
+            capture_down: false,
             previous_app: current,
             #[cfg(feature = "no-setup-btn")]
             setup_hold_ticks: 0,
@@ -87,6 +133,12 @@ impl AppHost {
             AppId::PaletteEditor => &mut self.palette_editor,
             #[cfg(feature = "launchpad-pro-mk3")]
             AppId::Seq95 => &mut self.seq95,
+            #[cfg(feature = "launchpad-x")]
+            AppId::Seq95 => &mut *self.seq95,
+            #[cfg(feature = "launchpad-x")]
+            AppId::Note => &mut self.note,
+            #[cfg(feature = "launchpad-x")]
+            AppId::Custom => &mut self.custom,
         }
     }
 
@@ -120,8 +172,24 @@ impl AppHost {
 
     #[inline(never)]
     pub fn route_surface_event(&mut self, event: SurfaceEvent) {
+        // The press that wakes the LEDs from the light show or sleep does nothing else.
+        #[cfg(feature = "launchpad-x")]
+        if crate::sys::idle::touch() {
+            return;
+        }
+
+        #[cfg(feature = "launchpad-x")]
+        if event.index == CAPTURE_BUTTON_INDEX {
+            self.capture_down = event.pressed;
+        }
+
         #[cfg(feature = "launchpad-pro-mk3")]
         if self.handle_seq95_button(&event) {
+            return;
+        }
+
+        #[cfg(feature = "launchpad-x")]
+        if self.handle_custom_button(&event) || self.handle_note_button(&event) {
             return;
         }
 
@@ -159,9 +227,15 @@ impl AppHost {
 
     #[inline(never)]
     pub fn route_midi_event(&mut self, event: MidiEvent) {
+        // Setup > MIDI can switch the incoming clock and transport off for everything.
+        #[cfg(feature = "launchpad-x")]
+        if crate::sys::prefs::is_clock_message(event.status) && !crate::sys::prefs::get().rx_clock {
+            return;
+        }
+
         // The sequencer follows clock from either port and takes transposition
         // notes from the MIDI port, whichever mode is on screen.
-        #[cfg(feature = "launchpad-pro-mk3")]
+        #[cfg(any(feature = "launchpad-pro-mk3", feature = "launchpad-x"))]
         if (event.port == MidiPort::Midi || event.status >= 0xf8) && self.seq95.midi_in(&event) {
             return;
         }
@@ -197,6 +271,11 @@ impl AppHost {
 
     #[inline(never)]
     pub fn receive_sysex(&mut self, port: MidiPort, data: &[u8]) {
+        #[cfg(feature = "diag")]
+        if port == MidiPort::Midi && crate::sys::diag::execute(data) {
+            return;
+        }
+
         if port == MidiPort::Daw {
             if sysex::device_inquiry::execute(self.current, port, data)
                 || sysex::version_inquiry::execute(self.current, port, data)
@@ -241,8 +320,11 @@ impl AppHost {
         #[cfg(not(feature = "no-setup-btn"))]
         self.tick_setup_button();
 
-        #[cfg(feature = "launchpad-pro-mk3")]
+        #[cfg(any(feature = "launchpad-pro-mk3", feature = "launchpad-x"))]
         self.seq95.background_tick();
+
+        #[cfg(feature = "launchpad-x")]
+        crate::sys::idle::tick();
 
         led::tick();
         self.active_app_mut().on_tick();
@@ -301,6 +383,54 @@ impl AppHost {
         true
     }
 
+    // Custom opens the Custom Modes, Capture MIDI + Custom the sequencer; either
+    // button press leaves them again. `seq95_return` is the mode they came from.
+    #[cfg(feature = "launchpad-x")]
+    fn handle_custom_button(&mut self, event: &SurfaceEvent) -> bool {
+        if event.index != SEQ95_BUTTON_INDEX
+            || matches!(
+                self.current,
+                AppId::Boot | AppId::Setup | AppId::PaletteEditor
+            )
+        {
+            return false;
+        }
+
+        if event.pressed {
+            let inside = matches!(self.current, AppId::Custom | AppId::Seq95);
+            if !inside {
+                self.seq95_return = self.current;
+            }
+            if self.current == AppId::Seq95 || (self.current == AppId::Custom && !self.capture_down) {
+                self.switch(self.seq95_return);
+            } else if self.capture_down {
+                self.switch(AppId::Seq95);
+            } else {
+                self.switch(AppId::Custom);
+            }
+        }
+
+        true
+    }
+
+    #[cfg(feature = "launchpad-x")]
+    fn handle_note_button(&mut self, event: &SurfaceEvent) -> bool {
+        if event.index != NOTE_BUTTON_INDEX
+            || !matches!(
+                self.current,
+                AppId::Performance | AppId::Custom | AppId::Daw
+            )
+        {
+            return false;
+        }
+
+        if event.pressed {
+            self.switch(AppId::Note);
+        }
+
+        true
+    }
+
     fn exit_setup(&mut self) {
         let selected = self.setup.finish_setup();
         let pending = self.pending_host_switch.take();
@@ -334,8 +464,20 @@ impl AppHost {
             self.setup_hold_ticks = 0;
             self.setup_hold_active = true;
         } else {
+            // A short press (the hold did not reach Setup) is the Session button
+            // of the Launchpad: it opens the Ableton Live Session mode.
+            #[cfg(feature = "launchpad-x")]
+            let tap = self.setup_hold_active
+                && matches!(
+                    self.current,
+                    AppId::Performance | AppId::Note | AppId::Custom | AppId::Seq95
+                );
             self.setup_hold_active = false;
             self.setup_hold_ticks = 0;
+            #[cfg(feature = "launchpad-x")]
+            if tap {
+                self.switch(AppId::Daw);
+            }
         }
 
         true

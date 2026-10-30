@@ -11,6 +11,10 @@ use crate::sys::settings;
 
 const BRIGHTNESS_START: u8 = 31;
 const BRIGHTNESS_END: u8 = 38;
+#[cfg(feature = "launchpad-x")]
+const IDLE_VEGAS: u8 = 51;
+#[cfg(feature = "launchpad-x")]
+const IDLE_SLEEP: u8 = 52;
 
 
 #[cfg(not(feature = "launchpad-pro-mk3"))]
@@ -45,6 +49,14 @@ impl LedsPage {
                 0xddddff,
             ),
         }
+    }
+
+    /// Launchpad X: pad 1 of row 5 is Vegas mode, pad 2 LED sleep.
+    #[cfg(feature = "launchpad-x")]
+    fn draw_idle_toggles(&self) {
+        let p = crate::sys::prefs::get();
+        led::set(IDLE_VEGAS, if p.vegas { 0x10ff10 } else { 0xff1010 });
+        led::set(IDLE_SLEEP, if p.sleep { 0x10ff10 } else { 0xff1010 });
     }
 
     fn draw_brightness_selector(&self) {
@@ -116,6 +128,8 @@ impl Page for LedsPage {
         #[cfg(feature = "launchpad-pro-mk3")]
         self.draw_mirror_toggle();
         self.draw_rotation_selector();
+        #[cfg(feature = "launchpad-x")]
+        self.draw_idle_toggles();
     }
 
     fn on_surface(&mut self, event: SurfaceEvent) {
@@ -125,6 +139,19 @@ impl Page for LedsPage {
                 s.mirror_enabled = if s.mirror_enabled != 0 { 0 } else { 1 };
             });
             self.draw_mirror_toggle();
+            return;
+        }
+
+        #[cfg(feature = "launchpad-x")]
+        if event.pressed && (event.index == IDLE_VEGAS || event.index == IDLE_SLEEP) {
+            crate::sys::prefs::update(|p| {
+                if event.index == IDLE_VEGAS {
+                    p.vegas = !p.vegas;
+                } else {
+                    p.sleep = !p.sleep;
+                }
+            });
+            self.draw_idle_toggles();
             return;
         }
 

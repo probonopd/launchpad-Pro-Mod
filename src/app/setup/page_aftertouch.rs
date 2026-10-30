@@ -16,6 +16,9 @@ const MODE_BUTTON_CHANNEL: u8 = 33;
 
 const CURVE_START: u8 = 21;
 const CURVE_END: u8 = 23;
+// Aftertouch threshold, three levels (low to high), row 5.
+#[cfg(feature = "launchpad-x")]
+const THRESHOLD_START: u8 = 51;
 
 pub struct AftertouchPage {
     text: Text,
@@ -73,6 +76,14 @@ impl AftertouchPage {
                 led::set(CURVE_START + i, 0x000000);
             }
         }
+
+        #[cfg(feature = "launchpad-x")]
+        {
+            let level = crate::sys::prefs::get().aftertouch;
+            for i in 0..crate::sys::prefs::AFTERTOUCH_LEVELS {
+                led::set(THRESHOLD_START + i, if i == level { 0xffffff } else { 0x101010 });
+            }
+        }
     }
 }
 
@@ -99,6 +110,13 @@ impl Page for AftertouchPage {
             }
             MODE_BUTTON_CHANNEL => {
                 settings::update(|s| s.aftertouch_mode = AT_MODE_CHANNEL);
+                self.draw();
+            }
+            #[cfg(feature = "launchpad-x")]
+            THRESHOLD_START..=53 => {
+                let mut p = crate::sys::prefs::get();
+                p.aftertouch = event.index - THRESHOLD_START;
+                crate::sys::prefs::set(p);
                 self.draw();
             }
             CURVE_START..=CURVE_END => {

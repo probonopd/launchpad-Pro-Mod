@@ -41,6 +41,25 @@ pub const SETTINGS_OFFSET: u32 = TOTAL_SIZE - 2 * SECTOR_SIZE as u32 + PAGE_SIZE
 #[cfg(not(feature = "launchpad-pro-mk3"))]
 pub const SETTINGS_OFFSET: u32 = TOTAL_SIZE - SETTINGS_SIZE;
 
+// The window for saved data (projects and preferences, see the `safestore` crate).
+// It ends where the settings window begins and lies far above the identity block
+// (0x0000-0x1FFF) and the bootloader's staging area for updates (0x3000-0x3FFFF).
+#[cfg(feature = "launchpad-x")]
+pub const STORE_WINDOW_SECTORS: usize = 38;
+#[cfg(feature = "launchpad-x")]
+pub const STORE_WINDOW_BYTES: u32 = STORE_WINDOW_SECTORS as u32 * SECTOR_SIZE as u32;
+#[cfg(feature = "launchpad-x")]
+pub const STORE_WINDOW_OFFSET: u32 = SETTINGS_OFFSET - STORE_WINDOW_BYTES;
+#[cfg(feature = "launchpad-x")]
+const _: () = assert!(STORE_WINDOW_OFFSET % SECTOR_SIZE as u32 == 0);
+#[cfg(feature = "launchpad-x")]
+const _: () = assert!(STORE_WINDOW_OFFSET >= 0x0008_0000, "the store window must stay far above the staging area");
+#[cfg(feature = "launchpad-x")]
+const _: () = assert!(STORE_WINDOW_OFFSET + STORE_WINDOW_BYTES == SETTINGS_OFFSET);
+// The window is only used on the chip it was checked on (Macronix, 8 Mbit).
+#[cfg(feature = "launchpad-x")]
+const STORE_JEDEC_ID: [u8; 3] = [0xc2, 0x20, 0x14];
+
 #[cfg(feature = "launchpad-pro-mk3")]
 const LEGACY_SETTINGS_OFFSET: u32 = TOTAL_SIZE - 2 * SECTOR_SIZE as u32;
 
@@ -335,6 +354,71 @@ impl<'d> ExtFlash<'d> {
             }
         }
         true
+    }
+
+    /// Reads the chip at a physical offset, outside the settings window that
+    /// `read` is limited to. Read-only; used by the flash diagnostic.
+    #[cfg(feature = "diag")]
+    pub fn read_physical(&mut self, offset: u32, bytes: &mut [u8]) -> bool {
+        if offset.checked_add(bytes.len() as u32).is_none_or(|end| end > TOTAL_SIZE) {
+            return false;
+        }
+        match self.flash.as_mut() {
+            Some(flash) => flash.read(offset, bytes).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Reads inside the store window. Offsets are relative to the window.
+    #[cfg(feature = "launchpad-x")]
+    pub fn store_read(&mut self, offset: u32, bytes: &mut [u8]) -> bool {
+        if !self.store_usable() || offset.checked_add(bytes.len() as u32).is_none_or(|end| end > STORE_WINDOW_BYTES) {
+            return false;
+        }
+        match self.flash.as_mut() {
+            Some(flash) => flash.read(STORE_WINDOW_OFFSET + offset, bytes).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Erases one 4 KB sector of the store window. The only erase this chip is ever
+    /// asked to do for saved data: no chip erase, no block erase.
+    #[cfg(feature = "launchpad-x")]
+    pub fn store_erase_sector(&mut self, sector: usize) -> bool {
+        if !self.store_usable() || sector >= STORE_WINDOW_SECTORS {
+            return false;
+        }
+        let address = STORE_WINDOW_OFFSET + (sector * SECTOR_SIZE) as u32;
+        match self.flash.as_mut() {
+            Some(flash) => flash.erase_sectors(address, 1).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Programs bytes inside one page of the store window.
+    #[cfg(feature = "launchpad-x")]
+    pub fn store_program(&mut self, offset: u32, bytes: &[u8]) -> bool {
+        let end = match offset.checked_add(bytes.len() as u32) {
+            Some(end) if !bytes.is_empty() && end <= STORE_WINDOW_BYTES => end,
+            _ => return false,
+        };
+        // A page program wraps inside its page, so a write must not cross one.
+        if offset as usize / PAGE_SIZE != (end as usize - 1) / PAGE_SIZE || !self.store_usable() {
+            return false;
+        }
+        let mut page = [0u8; PAGE_SIZE];
+        let buf = &mut page[..bytes.len()];
+        buf.copy_from_slice(bytes);
+        match self.flash.as_mut() {
+            Some(flash) => flash.write_bytes(STORE_WINDOW_OFFSET + offset, buf).is_ok(),
+            None => false,
+        }
+    }
+
+    #[cfg(feature = "launchpad-x")]
+    fn store_usable(&mut self) -> bool {
+        self.probe();
+        self.present && self.jedec_id == STORE_JEDEC_ID
     }
 
     pub fn info(&mut self) -> ExtFlashInfo {

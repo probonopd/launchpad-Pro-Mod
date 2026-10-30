@@ -95,6 +95,21 @@ fn device_cfg(name: &str) -> Option<DeviceCfg> {
             artifact_stem: "core-launchpad-x",
             objcopy_pad_to: None,
         }),
+        // Read-only memory dump over SysEx for mapping free flash; never part of
+        // normal builds (see src/sys/diag.rs).
+        "lpx-diag" => Some(DeviceCfg {
+            device: "lpx-diag",
+            model_name: "Launchpad X (flash diagnostic)",
+            feature: "launchpad-x,diag",
+            target_triple: "thumbv7em-none-eabihf",
+            identity_family: [0x03, 0x01],
+            syx_product: "/x",
+            updater_family_id: Some(0x02),
+            updater_product_id: 0x0c,
+            default_version: "351",
+            artifact_stem: "core-launchpad-x-diag",
+            objcopy_pad_to: None,
+        }),
         "mini" => Some(DeviceCfg {
             device: "mini",
             model_name: "Launchpad Mini MK3",
@@ -180,6 +195,27 @@ fn device_cfg(name: &str) -> Option<DeviceCfg> {
 fn run(cmd: &str, args: &[&str], cwd: &Path) -> Result<(), Box<dyn Error>> {
     eprintln!("+ {} {}", cmd, args.join(" "));
     let status = Command::new(cmd).args(args).current_dir(cwd).status()?;
+    if !status.success() {
+        return Err(format!("command failed: {} {:?}", cmd, args).into());
+    }
+    Ok(())
+}
+
+fn run_with_env(
+    cmd: &str,
+    args: &[&str],
+    cwd: &Path,
+    envs: &[(&str, &str)],
+) -> Result<(), Box<dyn Error>> {
+    for (key, value) in envs {
+        eprintln!("+ {key}={value}");
+    }
+    eprintln!("+ {} {}", cmd, args.join(" "));
+    let status = Command::new(cmd)
+        .args(args)
+        .envs(envs.iter().copied())
+        .current_dir(cwd)
+        .status()?;
     if !status.success() {
         return Err(format!("command failed: {} {:?}", cmd, args).into());
     }
@@ -565,7 +601,7 @@ fn package(
     release: bool,
 ) -> Result<(), Box<dyn Error>> {
     let cfg = device_cfg(device)
-        .ok_or("device must be one of: lppmk3, lpx, mini, lpp, mk2, lps, minimk1")?;
+        .ok_or("device must be one of: lppmk3, lpx, lpx-diag, mini, lpp, mk2, lps, minimk1")?;
     let release = release || cfg.device == "mk2" || cfg.device == "minimk1";
     let env_version = env::var("FW_VERSION").ok();
     let version = version
@@ -573,6 +609,17 @@ fn package(
         .unwrap_or(cfg.default_version);
     let profile = if release { "release" } else { "debug" };
 
+    // The Launchpad X has two sequencer styles, chosen when building:
+    // LPX_SEQUENCER=launchpad95 (default) or novation. Exactly one is linked.
+    let features = if cfg.device.starts_with("lpx") {
+        let style = env::var("LPX_SEQUENCER").unwrap_or_else(|_| "launchpad95".to_string());
+        if style != "launchpad95" && style != "novation" {
+            return Err("LPX_SEQUENCER must be launchpad95 or novation".into());
+        }
+        format!("{},sequencer-{}", cfg.feature, style)
+    } else {
+        cfg.feature.to_string()
+    };
     let mut cargo_args = vec![
         "build",
         "--bin",
@@ -581,12 +628,20 @@ fn package(
         cfg.target_triple,
         "--no-default-features",
         "--features",
-        cfg.feature,
+        features.as_str(),
     ];
     if release {
         cargo_args.push("--release");
     }
-    run("cargo", &cargo_args, repo)?;
+    // The Launchpad X application area above the bootloader is 80 KB and the
+    // speed-optimized build does not fit; size optimization is about 27% smaller.
+    // Only this device gets it, the others keep the speed-optimized build.
+    let envs: &[(&str, &str)] = if cfg.device.starts_with("lpx") && release {
+        &[("CARGO_PROFILE_RELEASE_OPT_LEVEL", "s")]
+    } else {
+        &[]
+    };
+    run_with_env("cargo", &cargo_args, repo, envs)?;
 
     let elf = repo
         .join("target")

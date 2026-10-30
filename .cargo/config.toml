@@ -1,5 +1,6 @@
 [alias]
 lpx = "run -p xtask -- package lpx --release"
+lpxdiag = "run -p xtask -- package lpx-diag --release"
 mini = "run -p xtask -- package mini --release"
 minimk1 = "run -p xtask -- package minimk1 --release"
 lps = "run -p xtask -- package lps --release"

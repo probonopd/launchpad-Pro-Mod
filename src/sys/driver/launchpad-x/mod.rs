@@ -12,10 +12,13 @@ pub mod usb;
 use crate::sys::driver::common::storage::ExtFlash;
 
 use embassy_executor::Spawner;
+use embassy_stm32::peripherals;
 use embassy_stm32::rcc::*;
+use embassy_stm32::Peri;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Ticker};
+use crate::app::sequencer::SequencerApp;
 use crate::app::{AftertouchEvent, AppHost, AppId, SurfaceEvent};
 use crate::sys::driver;
 use crate::sys::settings;
@@ -23,12 +26,47 @@ use static_cell::StaticCell;
 
 type SharedAppHost = Mutex<CriticalSectionRawMutex, AppHost>;
 
+static GRID: StaticCell<grid::Grid> = StaticCell::new();
+static RUNTIME_DRIVER: StaticCell<runtime::RuntimeDriver> = StaticCell::new();
+static APP_HOST: StaticCell<SharedAppHost> = StaticCell::new();
+static SEQ95: StaticCell<SequencerApp> = StaticCell::new();
+
+// The big structures are built in functions of their own, built in place in their
+// statics. This keeps the temporaries of the construction out of the stack frame
+// of the main task, which is alive every time the executor polls it: with the
+// construction inside it, that frame (37 KB) was larger than the free RAM once the
+// sequencer's project buffer was added, and the firmware crashed before USB came up.
+#[inline(never)]
+fn init_grid() -> &'static mut grid::Grid {
+    GRID.init_with(grid::Grid::new)
+}
+
+#[inline(never)]
+fn init_runtime_driver(
+    grid: &mut grid::Grid,
+    spi2: Peri<'static, peripherals::SPI2>,
+    pb13: Peri<'static, peripherals::PB13>,
+    pb15: Peri<'static, peripherals::PB15>,
+    pb14: Peri<'static, peripherals::PB14>,
+    pb12: Peri<'static, peripherals::PB12>,
+) -> &'static mut runtime::RuntimeDriver {
+    RUNTIME_DRIVER.init_with(|| runtime::RuntimeDriver::new(grid, ExtFlash::new(spi2, pb13, pb15, pb14, pb12)))
+}
+
+// The sequencer is the biggest app and has its own function, so that its temporaries
+// and those of the app host are never on the stack together.
+#[inline(never)]
+fn init_sequencer() -> &'static mut SequencerApp {
+    SEQ95.init_with(SequencerApp::new)
+}
+
+#[inline(never)]
+fn init_app_host(seq95: &'static mut SequencerApp) -> &'static mut SharedAppHost {
+    APP_HOST.init_with(|| Mutex::new(AppHost::new_with_sequencer(AppId::Boot, seq95)))
+}
+
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    static GRID: StaticCell<grid::Grid> = StaticCell::new();
-    static RUNTIME_DRIVER: StaticCell<runtime::RuntimeDriver> = StaticCell::new();
-    static APP_HOST: StaticCell<SharedAppHost> = StaticCell::new();
-
     let mut config = embassy_stm32::Config::default();
 
     config.rcc.hse = Some(Hse {
@@ -57,13 +95,14 @@ async fn main(_spawner: Spawner) {
     usb::init_event_queues();
     usb::init();
 
-    let grid = GRID.init(grid::Grid::new());
-    let flash = ExtFlash::new(p.SPI2, p.PB13, p.PB15, p.PB14, p.PB12);
-    let runtime_driver = RUNTIME_DRIVER.init(runtime::RuntimeDriver::new(grid, flash));
+    let grid = init_grid();
+    let runtime_driver = init_runtime_driver(grid, p.SPI2, p.PB13, p.PB15, p.PB14, p.PB12);
     driver::install(runtime_driver);
     settings::load();
+    crate::sys::prefs::load();
 
-    let app_host = APP_HOST.init(Mutex::new(AppHost::new(AppId::Boot)));
+    let sequencer = init_sequencer();
+    let app_host = init_app_host(sequencer);
     app_host.lock().await.init();
 
     led_scan::start(grid);

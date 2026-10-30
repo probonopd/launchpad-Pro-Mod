@@ -2,6 +2,7 @@
 // Copyright (C) 2025-2026 Anthony Hofmeister
 // Copyright (C) 2026 ZephyrCodesStuff
 
+use core::sync::atomic::{AtomicU16, Ordering};
 use stm32_metapac as pac;
 
 // ----------------------------
@@ -27,16 +28,44 @@ const LP_GRID_QUEUE_LEN: usize = 64;
 // DSP, Calibration & Sensitivity Tuning Thresholds
 // ----------------------------
 
-/// Minimum pressure required to trigger a Note On.
-///
-/// Resting fingers or light touches below this value are ignored.
+/// Pressure that gives the minimum velocity; the velocity curve is measured from here
+/// whatever trigger threshold is chosen.
 const LP_PRESS_START_NORM: u16 = 300;
 
-/// Pressure threshold to trigger a Note Off.
-///
-/// Using a lower release threshold than start threshold creates hysteresis,
-/// preventing rapid note flickering when a pad is lightly held.
-const LP_PRESS_RELEASE_NORM: u16 = 144;
+/// Minimum pressure required to trigger a Note On, for the four trigger levels of the
+/// Setup menu (lowest = very light touch, the default). Resting fingers or light touches
+/// below it are ignored.
+const TRIGGER_LEVELS: [u16; 4] = [300, 450, 650, 900];
+
+/// Pressure at which Polyphonic Aftertouch messages start: off (as soon as the pad is
+/// down), low (the default) and high.
+const AFTERTOUCH_LEVELS: [u16; 3] = [301, 601, 1000];
+
+static TRIGGER_START: AtomicU16 = AtomicU16::new(TRIGGER_LEVELS[0]);
+static AFTERTOUCH_START: AtomicU16 = AtomicU16::new(AFTERTOUCH_LEVELS[1]);
+
+/// Chooses the trigger level 0..=3 (invalid values select the lowest).
+pub fn set_trigger_level(level: u8) {
+    TRIGGER_START.store(*TRIGGER_LEVELS.get(level as usize).unwrap_or(&TRIGGER_LEVELS[0]), Ordering::Relaxed);
+}
+
+/// Chooses the aftertouch threshold 0..=2 (invalid values select the default).
+pub fn set_aftertouch_threshold(level: u8) {
+    AFTERTOUCH_START.store(*AFTERTOUCH_LEVELS.get(level as usize).unwrap_or(&AFTERTOUCH_LEVELS[1]), Ordering::Relaxed);
+}
+
+#[inline(always)]
+fn trigger_start() -> u16 {
+    TRIGGER_START.load(Ordering::Relaxed)
+}
+
+/// Pressure threshold to trigger a Note Off. A lower release threshold than the start
+/// threshold creates hysteresis, preventing rapid note flickering when a pad is lightly
+/// held; it keeps the original proportion (144 to 300) at every trigger level.
+#[inline(always)]
+fn trigger_release() -> u16 {
+    (trigger_start() as u32 * 144 / 300) as u16
+}
 
 /// Debounce sample counter required before confirming a press.
 const LP_PRESS_ON_COUNT: u8 = 1;
@@ -47,9 +76,6 @@ const LP_RELEASE_COUNT: u8 = 8;
 // ----------------------------
 // Polyphonic Aftertouch Filtering
 // ----------------------------
-
-/// Pressure threshold before Polyphonic Aftertouch MIDI messages start sending.
-const LP_AFTER_START_NORM: u16 = 601;
 
 /// Minimum pressure change required before sending a new Aftertouch message (prevents spamming the USB MIDI bus with minor noise).
 const LP_AFTER_DELTA_THR: u8 = 3;
@@ -431,7 +457,7 @@ impl Inputs {
         let pressure = norm_to_aftertouch(norm);
 
         if !self.grid_pressed[sensor] {
-            if delta >= LP_PRESS_START_NORM {
+            if delta >= trigger_start() {
                 self.grid_on_count[sensor] = self.grid_on_count[sensor].saturating_add(1);
                 if self.grid_on_count[sensor] >= LP_PRESS_ON_COUNT {
                     self.grid_pressed[sensor] = true;
@@ -462,7 +488,7 @@ impl Inputs {
             }
         }
 
-        if delta <= LP_PRESS_RELEASE_NORM {
+        if delta <= trigger_release() {
             self.grid_off_count[sensor] = self.grid_off_count[sensor].saturating_add(1);
             if self.grid_off_count[sensor] >= LP_RELEASE_COUNT
                 && self.grid_release_holdoff[sensor] == 0
@@ -569,7 +595,7 @@ fn norm_to_velocity(norm: u16) -> u8 {
 
 #[inline(always)]
 fn norm_to_aftertouch(norm: u16) -> u8 {
-    if norm <= LP_AFTER_START_NORM {
+    if norm <= AFTERTOUCH_START.load(Ordering::Relaxed) {
         return 0;
     }
 
